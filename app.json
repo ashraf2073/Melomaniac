@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "Melomaniac",
+    "slug": "melomaniac",
+    "scheme": "melomaniac",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0B0B0C",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.melomaniac.app"
+    },
+    "android": {
+      "package": "com.melomaniac.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0B0C",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": ["POST_NOTIFICATIONS"],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true,
+          "enableBackgroundRecording": false,
+          "recordAudioAndroid": false,
+          "microphonePermission": false
+        }
+      ]
+    ]
+  }
+}
