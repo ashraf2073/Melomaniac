@@ -34,5 +34,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
   },
-  androidGlass: { backgroundColor: colors.glassStrong },
+  // Without a blur, a see-through panel just lets scrolling text bleed through the tab bar.
+  androidGlass: { backgroundColor: colors.glassSolid },
 });

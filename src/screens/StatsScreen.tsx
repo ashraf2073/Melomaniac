@@ -51,6 +51,11 @@ export function StatsScreen({ navigation }: TabScreenProps<'Stats'>) {
       color: (opacity = 1) => `rgba(29, 185, 84, ${opacity})`,
       labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity * 0.7})`,
       barPercentage: 0.6,
+      // chart-kit fills bars at 10% opacity by default, which looks empty on a dark card.
+      fillShadowGradientFrom: accent,
+      fillShadowGradientFromOpacity: 1,
+      fillShadowGradientTo: accent,
+      fillShadowGradientToOpacity: 0.55,
       propsForBackgroundLines: { stroke: 'rgba(255,255,255,0.08)' },
     }),
     [],
