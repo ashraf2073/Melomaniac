@@ -82,8 +82,9 @@ jobs:
       - name: Generate the Android project
         run: npx expo prebuild --platform android --no-install
 
+      # The generated file does not end with a newline, so the new line must start with one.
       - name: Give Gradle more memory
-        run: echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g" >> android/gradle.properties
+        run: printf '\norg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g\n' >> android/gradle.properties
 
       # armeabi-v7a is kept on purpose: many budget phones run a 32-bit Android.
       # Minifying is off so a release-only crash cannot hide in shrunk code.
