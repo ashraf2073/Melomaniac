@@ -1,0 +1,25 @@
+name: Check Supabase connection
+
+# Takes about 20 seconds. Run it from the Actions tab (works from a phone browser)
+# whenever sign-in or sign-up fails with a network error, or before a build, to see
+# whether the two repository secrets are right. It never prints the key.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Test the Supabase address and key
+        env:
+          SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+        run: bash scripts/check-supabase.sh
