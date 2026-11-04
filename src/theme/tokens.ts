@@ -5,7 +5,7 @@ export const colors = {
   border: 'rgba(255,255,255,0.08)',
   glass: 'rgba(18,18,20,0.66)',
   glassStrong: 'rgba(18,18,20,0.86)',
-  glassSolid: 'rgba(18,18,20,0.97)', // blur-less fallback: opaque enough that content behind it cannot show through
+  glassSolid: 'rgb(18,18,20)', // blur-less fallback: fully opaque, because translucency without a blur only lets content bleed through
   accent: '#1DB954', // primary accent (Spotify-style green)
   accentAlt: '#00F0FF', // Electric Blue alternative
   text: '#FFFFFF',
