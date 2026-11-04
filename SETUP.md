@@ -1,6 +1,22 @@
 # Melomaniac: setup guide
 
-## Start here: fresh start in VS Code
+## Easiest: build the APK on GitHub, from your phone
+
+GitHub builds the app for free on its own servers. You need no computer, no Expo account and no VS Code. Every step works in a phone browser (if a GitHub page looks cut off, switch the browser to *Desktop site*).
+
+1. **Supabase.** At supabase.com create a project. In *SQL Editor*, paste all of `supabase/schema.sql` (open the file on GitHub, tap *Raw*, select all, copy) and tap *Run*. Do the same with `supabase/seed.sql` for six sample songs. Under *Authentication → Sign In / Providers → Email*, turn off *Confirm email* while testing. Then open *Project Settings → API Keys* and copy the **Project URL** and the **publishable** key. Never use the secret or `service_role` key.
+2. **Give GitHub those two values.** In this repo open *Settings → Secrets and variables → Actions → New repository secret*. Add `EXPO_PUBLIC_SUPABASE_URL` (the Project URL) and `EXPO_PUBLIC_SUPABASE_ANON_KEY` (the publishable key). Use exactly these names.
+3. **Build.** Open the *Actions* tab → *Build Android APK (free)* → *Run workflow* (leave the checkbox empty) → *Run workflow*. It usually takes 10 to 25 minutes. A green tick means done. If it shows a red cross, open the run, open the red step, and send the last lines to Claude.
+4. **Install.** On your phone open `https://github.com/ashraf2073/Melomaniac/releases/latest/download/melomaniac.apk` (or *Releases → latest → melomaniac.apk*). Allow your browser to *Install unknown apps* when asked. If Play Protect warns, choose *Install anyway* (the app is signed with a debug key, not a Play Store key).
+5. **Change something later.** Edit a file on GitHub (open it, tap the pencil, *Commit changes*), run the workflow again, and install the new APK over the old one. Your account and likes stay, because they live in Supabase.
+
+Each build gets a higher build number, so a new APK installs over the old one. The APK supports both 32-bit and 64-bit phones.
+
+Your own music also works from the phone: Supabase → *Storage → audio* → upload, then *Table Editor → tracks → Insert row* (see Part B).
+
+The rest of this guide is the VS Code route, for when you want live reload while changing code.
+
+## Option 2: fresh start in VS Code
 
 You'll install the real app on your phone first (a *development build*), then VS Code shows a QR code that connects the app to your code. This avoids Expo Go, whose Play Store version often lags behind new Expo SDKs.
 
@@ -102,9 +118,9 @@ npx eas-cli@latest build -p android --profile preview
 
 Before releasing, change `android.package` and `ios.bundleIdentifier` in `app.json` from `com.melomaniac.app` to an id you own.
 
-### Building from GitHub instead (optional)
+### Building with EAS from GitHub (optional)
 
-The repo has a workflow, `.github/workflows/apk.yml`. Run it from the repo's **Actions** tab → *Build Android APK* → *Run workflow*. It runs the same `preview` build as above. It needs two things first:
+The repo has a second workflow, `.github/workflows/apk.yml`, that uses Expo's build service. The one at the top of this guide is simpler and needs no Expo account. To use this one, run it from the **Actions** tab → *Build Android APK on EAS (needs an Expo account)* → *Run workflow*. It runs the same `preview` build as above. It needs two things first:
 
 1. A repository secret named `EXPO_TOKEN` (create the token at expo.dev → *Account settings* → *Access tokens*; add it under the repo's *Settings → Secrets and variables → Actions*).
 2. The project linked to EAS: run `npx eas-cli@latest init` once on your computer, then commit and push the change it makes to `app.json`.
@@ -176,3 +192,7 @@ melomaniac/
 | A track won't play | Open its `audio_path` URL in a browser; it must be a direct audio file. |
 | Audio stops after ~3 min in the background | Lock-screen controls must be active (the app turns them on when you press play). Make sure you're using the installed build. |
 | `permission denied for function` | Re-run `schema.sql` as the project owner. |
+| GitHub build stops at "Check the Supabase secrets" | Add the two repository secrets with exactly the names in step 2 of the phone guide, then run the workflow again. |
+| GitHub build fails at "Build the APK" | Open the run, open that red step, scroll to the first line that says `FAILED` or `error:`, and send Claude the last 40 lines. |
+| The installed app says Supabase isn't configured | The secrets were added after that build, or a name is misspelled. Fix them and run the workflow again; the new build number installs over the old app. |
+| Phone says "App not installed" | Uninstall any older Melomaniac first (an APK from another build system has a different signature), then install again. |

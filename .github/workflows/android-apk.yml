@@ -1,0 +1,134 @@
+name: Build Android APK (free)
+
+# Builds an installable APK on GitHub's own servers: no Expo account and no computer.
+# Run it from the repo's Actions tab (works from a phone browser), then install
+# melomaniac.apk from the Releases page.
+#
+# One-time setup: add two repository secrets under
+# Settings > Secrets and variables > Actions:
+#   EXPO_PUBLIC_SUPABASE_URL
+#   EXPO_PUBLIC_SUPABASE_ANON_KEY   (the publishable / anon key, never the secret key)
+
+on:
+  workflow_dispatch:
+    inputs:
+      allow_missing_secrets:
+        description: "Build even if the Supabase secrets are missing (testing only, the app will not connect)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # lets the job publish the release
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CI: "true"
+      EXPO_NO_TELEMETRY: "1"
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Check the Supabase secrets
+        id: supabase
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          ALLOW_MISSING: ${{ inputs.allow_missing_secrets }}
+        run: |
+          if [ -n "$EXPO_PUBLIC_SUPABASE_URL" ] && [ -n "$EXPO_PUBLIC_SUPABASE_ANON_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          elif [ "$ALLOW_MISSING" = "true" ]; then
+            echo "::warning::The Supabase secrets are missing, so this APK will not be able to sign in."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Add the repository secrets EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY (Settings > Secrets and variables > Actions), then run this workflow again."
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Android only installs an APK over an older one if the build number goes up.
+      - name: Number this build
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const app = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+            app.expo.android.versionCode = Number(process.env.RUN_NUMBER);
+            fs.writeFileSync('app.json', JSON.stringify(app, null, 2) + '\n');
+          "
+
+      - name: Generate the Android project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Give Gradle more memory
+        run: echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g" >> android/gradle.properties
+
+      # armeabi-v7a is kept on purpose: many budget phones run a 32-bit Android.
+      # Minifying is off so a release-only crash cannot hide in shrunk code.
+      # Release builds are signed with the standard debug key, which is fine for
+      # sideloading and keeps updates installable over each other.
+      - name: Build the APK
+        working-directory: android
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+        run: >
+          bash ./gradlew assembleRelease --no-daemon --stacktrace
+          -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+          -Pandroid.enableMinifyInReleaseBuilds=false
+          -Pandroid.enablePngCrunchInReleaseBuilds=false
+
+      - name: Check the APK
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          test -f "$APK" || { echo "::error::The build finished but no APK was produced."; exit 1; }
+          ls -lh "$APK"
+
+      - name: Publish the APK as a release
+        if: steps.supabase.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk melomaniac.apk
+          TAG="build-$RUN_NUMBER"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" melomaniac.apk \
+            --target "$GITHUB_SHA" \
+            --latest \
+            --title "Melomaniac build $RUN_NUMBER" \
+            --notes "Android APK built from commit ${GITHUB_SHA::7}. Download melomaniac.apk below and install it."
+          {
+            echo "### APK ready"
+            echo "Download: https://github.com/$GITHUB_REPOSITORY/releases/latest/download/melomaniac.apk"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the test APK on the run page
+        if: steps.supabase.outputs.configured != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: melomaniac-apk-without-supabase
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 3
