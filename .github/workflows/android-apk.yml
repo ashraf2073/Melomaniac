@@ -52,6 +52,16 @@ jobs:
             exit 1
           fi
 
+      # Stops in seconds, with a plain message, instead of after a 20 minute build that
+      # would give an app which cannot reach Supabase (typo in the address, paused project,
+      # wrong key, or the secret key pasted by mistake).
+      - name: Test the Supabase address and key
+        if: steps.supabase.outputs.configured == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+        run: bash scripts/check-supabase.sh
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:

@@ -4,15 +4,16 @@
 
 GitHub builds the app for free on its own servers. You need no computer, no Expo account and no VS Code. Every step works in a phone browser (if a GitHub page looks cut off, switch the browser to *Desktop site*).
 
-1. **Supabase.** At supabase.com create a project. In *SQL Editor*, paste all of `supabase/schema.sql` (open the file on GitHub, tap *Raw*, select all, copy) and tap *Run*. Do the same with `supabase/seed.sql` for six sample songs. Under *Authentication → Sign In / Providers → Email*, turn off *Confirm email* while testing. Then open *Project Settings → API Keys* and copy the **Project URL** and the **publishable** key. Never use the secret or `service_role` key.
+1. **Supabase.** At supabase.com create a project. In *SQL Editor*, paste all of `supabase/schema.sql` (open the file on GitHub, tap *Raw*, select all, copy) and tap *Run*. Do the same with `supabase/seed.sql` for six sample songs. Under *Authentication → Sign In / Providers → Email*, turn off *Confirm email* while testing. Then open *Project Settings → API Keys* and copy the **Project URL** and the **publishable** key. Never use the secret or `service_role` key. When a new version of the app comes with a changed `schema.sql`, run it again; it is safe to repeat.
 2. **Give GitHub those two values.** In this repo open *Settings → Secrets and variables → Actions → New repository secret*. Add `EXPO_PUBLIC_SUPABASE_URL` (the Project URL) and `EXPO_PUBLIC_SUPABASE_ANON_KEY` (the publishable key). Use exactly these names.
-3. **Build.** Open the *Actions* tab → *Build Android APK (free)* → *Run workflow* (leave the checkbox empty) → *Run workflow*. It usually takes 10 to 25 minutes. A green tick means done. If it shows a red cross, open the run, open the red step, and send the last lines to Claude.
+3. **Build.** Open the *Actions* tab → *Build Android APK (free)* → *Run workflow* (leave the checkbox empty) → *Run workflow*. It usually takes 15 to 25 minutes. The first thing it does is test your two Supabase values, and it stops within seconds with a plain message if the address does not exist (a typo, or a paused project) or the key is wrong. A green tick means done. If it shows a red cross, open the run, open the red step, and send the last lines to Claude.
 4. **Install.** On your phone open `https://github.com/ashraf2073/Melomaniac/releases/latest/download/melomaniac.apk` (or *Releases → latest → melomaniac.apk*). Allow your browser to *Install unknown apps* when asked. If Play Protect warns, choose *Install anyway* (the app is signed with a debug key, not a Play Store key).
-5. **Change something later.** Edit a file on GitHub (open it, tap the pencil, *Commit changes*), run the workflow again, and install the new APK over the old one. Your account and likes stay, because they live in Supabase.
+5. **Become the admin (once).** In the app tap *Create account* and sign up. Then in Supabase open *SQL Editor*, paste all of `supabase/make-admin.sql`, replace `PUT-YOUR-EMAIL-HERE` with the email you signed up with, and tap *Run*. The table it shows should list your email. Open the app's *Library* tab: an **Admin tools** row and an ADMIN badge appear (sign out and back in if they do not). Admin tools shows totals and lets you add, edit and delete songs, uploading the audio and cover from your phone. Admin status lives in Supabase, so nobody can give it to themselves from the app.
+6. **Change something later.** Edit a file on GitHub (open it, tap the pencil, *Commit changes*), run the workflow again, and install the new APK over the old one. Your account and likes stay, because they live in Supabase.
 
 Each build gets a higher build number, so a new APK installs over the old one. The APK supports both 32-bit and 64-bit phones.
 
-Your own music also works from the phone: Supabase → *Storage → audio* → upload, then *Table Editor → tracks → Insert row* (see Part B).
+Your own music also works from the phone: as an admin, open *Library → Admin tools → Add song* and pick the files, or upload in Supabase (*Storage → audio*, then *Table Editor → tracks → Insert row*, see Part B). Only add music you own or are licensed to use.
 
 The rest of this guide is the VS Code route, for when you want live reload while changing code.
 
@@ -91,8 +92,8 @@ A QR code appears. On the phone, open the **Melomaniac** app you just installed 
 ## Part B: Supabase setup (skip if already done)
 
 1. **Create a project** at supabase.com → *New project*.
-2. **Tables:** *SQL Editor → New query* → paste all of `supabase/schema.sql` → *Run*. It creates `users`, `tracks`, `listen_history`, `playlists` (plus `playlist_tracks`, `liked_tracks`), Row Level Security, the `audio` and `covers` storage buckets, and the stats functions. Safe to run twice.
-3. **Music:** paste `supabase/seed.sql` → *Run* for six placeholder tracks, or add your own: upload an `.mp3` to *Storage → audio* (artwork to *covers*), then
+2. **Tables:** *SQL Editor → New query* → paste all of `supabase/schema.sql` → *Run*. It creates `users`, `tracks`, `listen_history`, `playlists` (plus `playlist_tracks`, `liked_tracks`), Row Level Security, the `admins` table and the admin rules, the access grants Supabase has required for new tables since 30 Oct 2026, the `audio` and `covers` storage buckets, and the stats functions. Safe to run twice.
+3. **Music:** add songs from the app as an admin (step 5 at the top), or paste `supabase/seed.sql` → *Run* for six placeholder tracks, or add your own by hand: upload an `.mp3` to *Storage → audio* (artwork to *covers*), then
    ```sql
    insert into public.tracks (title, artist, album, genre, duration_seconds, audio_path, cover_path)
    values ('My Song', 'My Band', 'Debut', 'Rock', 215, 'my-song.mp3', 'my-song.jpg');
@@ -140,11 +141,12 @@ melomaniac/
 ├── .env.example               Supabase URL + publishable key
 ├── .vscode/                   Makes VS Code use the project's own TypeScript
 ├── supabase/
-│   ├── schema.sql             Tables, RLS policies, storage buckets, stats functions
+│   ├── schema.sql             Tables, RLS policies, grants, admin role, storage buckets, stats functions
+│   ├── make-admin.sql         Makes one account an admin (run once, after you sign up)
 │   └── seed.sql               Six placeholder tracks
 └── src/
     ├── navigation/            RootNavigator (stack) → TabNavigator (tabs) + GlassTabBar
-    ├── screens/               Home, Search, Library, TrackList, Stats, Unwrapped, Auth
+    ├── screens/               Home, Search, Library, TrackList, Stats, Unwrapped, Auth, Admin, SongEditor
     ├── components/
     │   ├── player/            PlayerSheet (mini bar ⇄ full screen) and FullPlayer
     │   ├── stats/             Story slides and the count-up number
@@ -154,6 +156,7 @@ melomaniac/
     │   ├── audioEngine.ts     Wraps expo-audio's native playlist + lock-screen metadata
     │   ├── listenLogger.ts    The 30-second listen tracker + offline queue
     │   ├── catalog.ts         Supabase queries for tracks, likes, playlists
+    │   ├── admin.ts           Admin-only calls: totals, upload, edit and delete songs
     │   └── stats.ts           Calls the weekly_rewind / yearly_unwrapped functions
     ├── theme/tokens.ts        Colours and sizes (change the accent here)
     └── utils/                 Formatting, lyrics (plain or LRC) parsing, personality rules
@@ -177,6 +180,7 @@ melomaniac/
 - **Android glass effect** is a translucent panel rather than a real blur (cheaper and consistent). iOS gets a native blur.
 - **Music rights.** Streaming music you don't own or license isn't allowed. Use your own or properly licensed tracks. The seed rows point at public demo files only as placeholders.
 - **Storage buckets are public** so audio URLs work directly. For protected content, make the bucket private and use signed URLs.
+- **Admin is enforced by the database.** The app only hides the Admin screens from other people. What refuses song and file changes is Supabase's Row Level Security, unless the account is in the `admins` table, which can only be edited from the SQL Editor. The admin screens show totals, never what an individual listens to.
 - **Not included yet:** a Sunday push notification (needs `expo-notifications`), offline downloads, and iOS builds (needs an Apple developer account).
 
 ## Troubleshooting
@@ -195,4 +199,9 @@ melomaniac/
 | GitHub build stops at "Check the Supabase secrets" | Add the two repository secrets with exactly the names in step 2 of the phone guide, then run the workflow again. |
 | GitHub build fails at "Build the APK" | Open the run, open that red step, scroll to the first line that says `FAILED` or `error:`, and send Claude the last 40 lines. |
 | The installed app says Supabase isn't configured | The secrets were added after that build, or a name is misspelled. Fix them and run the workflow again; the new build number installs over the old app. |
+| Sign-in or sign-up says *Can't reach the server* | The phone has no working internet at that moment: look for a `!` next to the signal bars, try opening any website, or switch between Wi-Fi and mobile data. If the internet is fine, open *Actions → Check Supabase connection → Run workflow*: in about 20 seconds it says whether the project address and key are right. Free Supabase projects pause after a week of no use; open the dashboard and tap *Restore project*. |
+| *permission denied for table ...* after signing in | Run `supabase/schema.sql` again. Supabase stopped granting new tables to apps automatically on 30 Oct 2026, and the file now grants them. |
+| No *Admin tools* row in Library | Run `schema.sql`, then `make-admin.sql` with the exact email you signed up with (the table it shows must list your email), then reopen *Library*. |
+| Admin tools says *The admin setup isn't in the database yet* | Run `supabase/schema.sql` again, then pull down to refresh. |
+| An upload fails with a size error | Supabase's free plan accepts files up to 50 MB. Use a smaller file. |
 | Phone says "App not installed" | Uninstall any older Melomaniac first (an APK from another build system has a different signature), then install again. |
