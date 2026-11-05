@@ -12,6 +12,7 @@ import { coverUrlFromPath } from '../services/catalog';
 import { fetchWeeklyRewind } from '../services/stats';
 import { accent, colors, radius } from '../theme/tokens';
 import type { WeeklyRewindData } from '../types';
+import { describeError } from '../utils/errors';
 import { formatDuration, isSunday, weekdayShort } from '../utils/format';
 
 // Distinct, colour-blind-friendlier hues for the artist split chart.
@@ -33,7 +34,7 @@ export function StatsScreen({ navigation }: TabScreenProps<'Stats'>) {
       setData(await fetchWeeklyRewind());
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load your stats');
+      setError(describeError(e, 'Could not load your stats'));
     }
   }, []);
 

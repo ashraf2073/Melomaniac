@@ -16,6 +16,7 @@ import {
 import { fetchWeeklyRewind } from '../services/stats';
 import { colors } from '../theme/tokens';
 import type { Track, WeeklyRewindData } from '../types';
+import { describeError } from '../utils/errors';
 import { formatDuration, isSunday, weekdayShort } from '../utils/format';
 
 interface HomeData {
@@ -48,7 +49,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
       setData({ recent, recs, latest, weekly });
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong');
+      setError(describeError(e));
     }
   }, []);
 

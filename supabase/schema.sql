@@ -122,7 +122,7 @@ create policy "users_update_own" on public.users
   for update to authenticated
   using (id = (select auth.uid())) with check (id = (select auth.uid()));
 
--- tracks: any signed-in user can read; writes only via dashboard / service role
+-- tracks: any signed-in user can read; only admins can add, edit or delete (section 3b)
 drop policy if exists "tracks_select_authenticated" on public.tracks;
 create policy "tracks_select_authenticated" on public.tracks
   for select to authenticated using (true);
@@ -185,12 +185,92 @@ create policy "playlist_tracks_write_own" on public.playlist_tracks
                       where p.id = playlist_id and p.owner_id = (select auth.uid())));
 
 -- ---------------------------------------------------------------------
--- 4. STORAGE BUCKETS (public-read; uploads happen from the dashboard)
+-- 3b. ADMINS
+-- Who is an admin is decided here, on the server. The app only asks
+-- "am I an admin?" and can never grant it to itself: this table has no
+-- grants and no policies for the API, so the only way to add a row is the
+-- SQL Editor (see make-admin.sql).
+-- ---------------------------------------------------------------------
+create table if not exists public.admins (
+  user_id    uuid primary key references auth.users (id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+alter table public.admins enable row level security;
+revoke all on table public.admins from anon, authenticated;
+
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (select 1 from public.admins a where a.user_id = (select auth.uid()));
+$$;
+revoke all on function public.is_admin() from public, anon;
+grant execute on function public.is_admin() to authenticated;
+
+-- Admins manage the catalog: add, edit and delete songs.
+drop policy if exists "tracks_insert_admin" on public.tracks;
+create policy "tracks_insert_admin" on public.tracks
+  for insert to authenticated with check ((select public.is_admin()));
+drop policy if exists "tracks_update_admin" on public.tracks;
+create policy "tracks_update_admin" on public.tracks
+  for update to authenticated
+  using ((select public.is_admin())) with check ((select public.is_admin()));
+drop policy if exists "tracks_delete_admin" on public.tracks;
+create policy "tracks_delete_admin" on public.tracks
+  for delete to authenticated using ((select public.is_admin()));
+
+-- ---------------------------------------------------------------------
+-- 3c. ACCESS FOR THE APP (GRANTS)
+-- Since 30 Oct 2026 Supabase no longer gives the API roles access to new
+-- tables by itself, so it is granted here. Row Level Security above still
+-- decides which rows each person can see or change. Signed-out visitors
+-- (anon) get nothing.
+-- ---------------------------------------------------------------------
+revoke all on table public.users, public.tracks, public.listen_history,
+                    public.liked_tracks, public.playlists, public.playlist_tracks
+  from anon, authenticated;
+
+grant select on public.users to authenticated;
+grant update (username, display_name, avatar_url) on public.users to authenticated;
+grant select, insert, update, delete on public.tracks          to authenticated; -- writes: admins only (3b)
+grant select, insert, update, delete on public.listen_history  to authenticated;
+grant select, insert, delete         on public.liked_tracks    to authenticated;
+grant select, insert, update, delete on public.playlists       to authenticated;
+grant select, insert, update, delete on public.playlist_tracks to authenticated;
+
+-- For scripts that use the secret key (never put that key inside the app).
+grant select, insert, update, delete on all tables in schema public to service_role;
+
+-- ---------------------------------------------------------------------
+-- 4. STORAGE BUCKETS (public-read; admins upload from the app or the dashboard)
 -- For licensed commercial music, switch `audio` to private + signed URLs.
 -- ---------------------------------------------------------------------
 insert into storage.buckets (id, name, public)
 values ('audio', 'audio', true), ('covers', 'covers', true)
 on conflict (id) do update set public = excluded.public;
+
+-- Admins can upload, replace and delete song files and covers from the app.
+-- Everyone can still play and view them because the buckets are public-read.
+drop policy if exists "files_select_admin" on storage.objects;
+create policy "files_select_admin" on storage.objects
+  for select to authenticated
+  using (bucket_id in ('audio', 'covers') and (select public.is_admin()));
+drop policy if exists "files_insert_admin" on storage.objects;
+create policy "files_insert_admin" on storage.objects
+  for insert to authenticated
+  with check (bucket_id in ('audio', 'covers') and (select public.is_admin()));
+drop policy if exists "files_update_admin" on storage.objects;
+create policy "files_update_admin" on storage.objects
+  for update to authenticated
+  using (bucket_id in ('audio', 'covers') and (select public.is_admin()))
+  with check (bucket_id in ('audio', 'covers') and (select public.is_admin()));
+drop policy if exists "files_delete_admin" on storage.objects;
+create policy "files_delete_admin" on storage.objects
+  for delete to authenticated
+  using (bucket_id in ('audio', 'covers') and (select public.is_admin()));
 
 -- ---------------------------------------------------------------------
 -- 5. STATS FUNCTIONS (called from the app with supabase.rpc)
@@ -387,3 +467,67 @@ revoke all on function public.top_artists(int, int)            from public, anon
 grant execute on function public.weekly_rewind(timestamptz, text) to authenticated;
 grant execute on function public.yearly_unwrapped(int, text)      to authenticated;
 grant execute on function public.top_artists(int, int)            to authenticated;
+
+-- ---------------------------------------------------------------------
+-- 6. ADMIN FUNCTIONS (totals only: nobody's listening history is exposed)
+-- Each one refuses anyone who is not in public.admins.
+-- ---------------------------------------------------------------------
+create or replace function public.admin_overview()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Admins only' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'users',    (select count(*) from public.users),
+    'tracks',   (select count(*) from public.tracks),
+    'plays',    (select count(*) from public.listen_history),
+    'seconds',  coalesce((select sum(seconds_listened) from public.listen_history), 0),
+    'plays_7d', (select count(*) from public.listen_history where listened_at >= now() - interval '7 days'),
+    'top_tracks', coalesce((
+      select jsonb_agg(
+               jsonb_build_object('id', x.id, 'title', x.title, 'artist', x.artist, 'plays', x.plays)
+               order by x.plays desc)
+      from (
+        select t.id, t.title, t.artist, count(*) as plays
+        from public.listen_history h
+        join public.tracks t on t.id = h.track_id
+        group by t.id, t.title, t.artist
+        order by plays desc
+        limit 5
+      ) x
+    ), '[]'::jsonb)
+  );
+end;
+$$;
+
+create or replace function public.admin_listeners(p_limit int default 100)
+returns table (user_id uuid, name text, joined_at timestamptz, plays bigint)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Admins only' using errcode = '42501';
+  end if;
+  return query
+    select u.id, coalesce(u.display_name, u.username, 'listener'), u.created_at, count(h.id)
+    from public.users u
+    left join public.listen_history h on h.user_id = u.id
+    group by u.id, u.display_name, u.username, u.created_at
+    order by u.created_at desc
+    limit least(greatest(p_limit, 1), 500);
+end;
+$$;
+
+revoke all on function public.admin_overview()        from public, anon;
+revoke all on function public.admin_listeners(int)    from public, anon;
+grant execute on function public.admin_overview()     to authenticated;
+grant execute on function public.admin_listeners(int) to authenticated;

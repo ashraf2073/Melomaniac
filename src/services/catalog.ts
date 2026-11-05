@@ -151,7 +151,10 @@ export async function fetchLikedIds(): Promise<string[]> {
 
 export async function setLiked(trackId: string, liked: boolean): Promise<void> {
   if (liked) {
-    const { error } = await supabase.from('liked_tracks').upsert({ track_id: trackId });
+    // "Do nothing" when it is already liked. The merge form would need UPDATE access to the table.
+    const { error } = await supabase
+      .from('liked_tracks')
+      .upsert({ track_id: trackId }, { ignoreDuplicates: true });
     if (error) throw error;
   } else {
     const { error } = await supabase.from('liked_tracks').delete().eq('track_id', trackId);

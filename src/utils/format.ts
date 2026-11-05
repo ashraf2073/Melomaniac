@@ -6,6 +6,15 @@ export function formatTime(totalSeconds: number): string {
   return `${m}:${r.toString().padStart(2, '0')}`;
 }
 
+/** "3:25" -> 205, "205" -> 205, "1:02:03" -> 3723, empty or anything else -> null */
+export function parseLength(text: string): number | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const parts = trimmed.split(':').map((p) => p.trim());
+  if (parts.length > 3 || parts.some((p) => !/^\d+$/.test(p))) return null;
+  return parts.reduce((total, p) => total * 60 + Number(p), 0);
+}
+
 /** 15120 -> "4h 12m", 1800 -> "30m" */
 export function formatDuration(totalSeconds: number): string {
   const s = Math.max(0, Math.round(totalSeconds || 0));

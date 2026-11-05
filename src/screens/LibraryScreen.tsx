@@ -21,7 +21,7 @@ import { createPlaylist, fetchPlaylists } from '../services/catalog';
 import { fetchTopArtists } from '../services/stats';
 import { useAuthStore } from '../store/useAuthStore';
 import { useLibraryStore } from '../store/useLibraryStore';
-import { accent, colors, radius } from '../theme/tokens';
+import { accent, colors, onAccent, radius } from '../theme/tokens';
 import type { Playlist, RankedArtist } from '../types';
 import { formatDuration } from '../utils/format';
 import { notify } from '../utils/notify';
@@ -32,6 +32,8 @@ export function LibraryScreen({ navigation }: LibraryScreenProps<'LibraryHome'>)
   const likedCount = useLibraryStore((s) => s.likedIds.size);
   const email = useAuthStore((s) => s.session?.user.email);
   const signOut = useAuthStore((s) => s.signOut);
+  const isAdmin = useAuthStore((s) => s.isAdmin);
+  const refreshAdmin = useAuthStore((s) => s.refreshAdmin);
 
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [artists, setArtists] = useState<RankedArtist[]>([]);
@@ -40,10 +42,11 @@ export function LibraryScreen({ navigation }: LibraryScreenProps<'LibraryHome'>)
   const [name, setName] = useState('');
 
   const load = useCallback(async () => {
-    const [p, a] = await Promise.allSettled([fetchPlaylists(), fetchTopArtists(90, 12)]);
+    // Also re-checks admin status, so a just-granted admin shows up without signing out.
+    const [p, a] = await Promise.allSettled([fetchPlaylists(), fetchTopArtists(90, 12), refreshAdmin()]);
     if (p.status === 'fulfilled') setPlaylists(p.value);
     if (a.status === 'fulfilled') setArtists(a.value);
-  }, []);
+  }, [refreshAdmin]);
 
   useFocusEffect(
     useCallback(() => {
@@ -89,6 +92,25 @@ export function LibraryScreen({ navigation }: LibraryScreenProps<'LibraryHome'>)
         >
           Your Library
         </ScreenTitle>
+
+        {/* Admin tools: only shown when the server says this account is an admin */}
+        {isAdmin ? (
+          <Pressable
+            style={styles.row}
+            onPress={() => navigation.navigate('Admin')}
+            accessibilityRole="button"
+            accessibilityLabel="Admin tools"
+          >
+            <LinearGradient colors={['#0F7B3B', '#0B3A5C']} style={styles.tileArt}>
+              <Ionicons name="shield-checkmark" size={26} color="#fff" />
+            </LinearGradient>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowTitle}>Admin tools</Text>
+              <Text style={styles.rowSub}>Add and edit songs, see totals</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.textFaint} />
+          </Pressable>
+        ) : null}
 
         {/* Liked songs */}
         <Pressable
@@ -156,6 +178,11 @@ export function LibraryScreen({ navigation }: LibraryScreenProps<'LibraryHome'>)
 
         <View style={styles.account}>
           {email ? <Text style={styles.rowSub}>Signed in as {email}</Text> : null}
+          {isAdmin ? (
+            <View style={styles.adminBadge}>
+              <Text style={styles.adminBadgeText}>ADMIN</Text>
+            </View>
+          ) : null}
           <GhostButton label="Sign out" icon="log-out-outline" onPress={() => void signOut()} />
         </View>
       </ScrollView>
@@ -198,6 +225,8 @@ const styles = StyleSheet.create({
   rank: { color: accent, fontWeight: '800', fontSize: 15 },
   hint: { color: colors.textMuted, paddingHorizontal: 16, fontSize: 14 },
   account: { alignItems: 'center', gap: 12, marginTop: 36, paddingHorizontal: 16 },
+  adminBadge: { backgroundColor: accent, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  adminBadgeText: { color: onAccent, fontSize: 11, fontWeight: '900', letterSpacing: 0.8 },
   modalWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', padding: 24 },
   modal: { backgroundColor: colors.surfaceHigh, borderRadius: radius.lg, padding: 20, gap: 16 },
   modalTitle: { color: colors.text, fontSize: 20, fontWeight: '800' },
