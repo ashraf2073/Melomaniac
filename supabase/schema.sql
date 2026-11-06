@@ -245,6 +245,46 @@ grant select, insert, update, delete on public.playlist_tracks to authenticated;
 grant select, insert, update, delete on all tables in schema public to service_role;
 
 -- ---------------------------------------------------------------------
+-- 3d. PROFILE RULES
+-- People edit their own name, username and photo from the app. These rules
+-- are checked only when a value actually changes, so an older row (a username
+-- taken from an email address, say) never blocks an unrelated edit.
+-- ---------------------------------------------------------------------
+create or replace function public.check_profile_update()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.display_name is distinct from old.display_name
+     and new.display_name is not null
+     and char_length(btrim(new.display_name)) not between 1 and 60 then
+    raise exception 'Name must be 1 to 60 characters' using errcode = '23514';
+  end if;
+
+  if new.username is distinct from old.username
+     and new.username is not null
+     and new.username !~ '^[a-z0-9_.]{3,24}$' then
+    raise exception 'Username must be 3 to 24 characters: lowercase letters, numbers, dots and underscores'
+      using errcode = '23514';
+  end if;
+
+  if new.avatar_url is distinct from old.avatar_url
+     and new.avatar_url is not null
+     and (new.avatar_url !~ '^https://' or char_length(new.avatar_url) > 500) then
+    raise exception 'That profile picture address is not valid' using errcode = '23514';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists users_check_profile on public.users;
+create trigger users_check_profile
+  before update on public.users
+  for each row execute function public.check_profile_update();
+
+-- ---------------------------------------------------------------------
 -- 4. STORAGE BUCKETS (public-read; admins upload from the app or the dashboard)
 -- For licensed commercial music, switch `audio` to private + signed URLs.
 -- ---------------------------------------------------------------------
@@ -271,6 +311,34 @@ drop policy if exists "files_delete_admin" on storage.objects;
 create policy "files_delete_admin" on storage.objects
   for delete to authenticated
   using (bucket_id in ('audio', 'covers') and (select public.is_admin()));
+
+-- Profile pictures: public-read (so the app can show them), 5 MB max, images only.
+-- Each person can add, replace and remove files only inside their own folder,
+-- which is named after their user id (avatars/<user id>/photo.jpg).
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('avatars', 'avatars', true, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do update
+  set public             = excluded.public,
+      file_size_limit    = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "avatars_select_own" on storage.objects;
+create policy "avatars_select_own" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'avatars' and starts_with(name, (select auth.uid())::text || '/'));
+drop policy if exists "avatars_insert_own" on storage.objects;
+create policy "avatars_insert_own" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'avatars' and starts_with(name, (select auth.uid())::text || '/'));
+drop policy if exists "avatars_update_own" on storage.objects;
+create policy "avatars_update_own" on storage.objects
+  for update to authenticated
+  using (bucket_id = 'avatars' and starts_with(name, (select auth.uid())::text || '/'))
+  with check (bucket_id = 'avatars' and starts_with(name, (select auth.uid())::text || '/'));
+drop policy if exists "avatars_delete_own" on storage.objects;
+create policy "avatars_delete_own" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'avatars' and starts_with(name, (select auth.uid())::text || '/'));
 
 -- ---------------------------------------------------------------------
 -- 5. STATS FUNCTIONS (called from the app with supabase.rpc)
@@ -460,13 +528,38 @@ as $$
   limit p_limit;
 $$;
 
+-- Lifetime totals for the Profile screen. Counts only the caller's own rows.
+create or replace function public.profile_summary()
+returns jsonb
+language sql
+stable
+set search_path = ''
+as $$
+  select jsonb_build_object(
+    'plays',     (select count(*) from public.listen_history h
+                  where h.user_id = (select auth.uid())),
+    'seconds',   coalesce((select sum(h.seconds_listened) from public.listen_history h
+                           where h.user_id = (select auth.uid())), 0),
+    'artists',   (select count(distinct t.artist)
+                  from public.listen_history h
+                  join public.tracks t on t.id = h.track_id
+                  where h.user_id = (select auth.uid())),
+    'liked',     (select count(*) from public.liked_tracks l
+                  where l.user_id = (select auth.uid())),
+    'playlists', (select count(*) from public.playlists p
+                  where p.owner_id = (select auth.uid()))
+  );
+$$;
+
 -- Only signed-in users may call the stats functions.
 revoke all on function public.weekly_rewind(timestamptz, text) from public, anon;
 revoke all on function public.yearly_unwrapped(int, text)      from public, anon;
 revoke all on function public.top_artists(int, int)            from public, anon;
+revoke all on function public.profile_summary()                from public, anon;
 grant execute on function public.weekly_rewind(timestamptz, text) to authenticated;
 grant execute on function public.yearly_unwrapped(int, text)      to authenticated;
 grant execute on function public.top_artists(int, int)            to authenticated;
+grant execute on function public.profile_summary()                to authenticated;
 
 -- ---------------------------------------------------------------------
 -- 6. ADMIN FUNCTIONS (totals only: nobody's listening history is exposed)
